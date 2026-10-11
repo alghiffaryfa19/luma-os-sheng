@@ -1014,12 +1014,12 @@ jobs:
           fi
           EOF
           sudo chroot "$ROOTFS_MOUNT" chown "$USERNAME:wheel" "/home/$USERNAME/.bash_profile"
-          # logind: power key suspends (Denial idle policy handles lock/DPMS)
-          sudo mkdir -p "$ROOTFS_MOUNT/etc/systemd/logind.conf.d"
-          printf '[Login]\nHandlePowerKey=suspend\n' | \
-            sudo tee "$ROOTFS_MOUNT/etc/systemd/logind.conf.d/50-denial-power.conf" > /dev/null
+          # No HandlePowerKey= override: Denial takes the handle-power-key
+          # inhibitor and drives the action from its own settings. Without it
+          # logind keeps its poweroff default, so a missed inhibitor powers the
+          # device off instead of performing an action the user never chose.
           sudo chroot "$ROOTFS_MOUNT" systemctl enable bluetooth
-          echo "✓ Denial session configured on tty1 (shell: $SHELL_PROFILE, autologin lock: ${{ inputs.autologin }}, power key: suspend)"
+          echo "✓ Denial session configured on tty1 (shell: $SHELL_PROFILE, autologin lock: ${{ inputs.autologin }}, power key: Denial settings)"
 
       - name: "Enable Services"
         run: |
