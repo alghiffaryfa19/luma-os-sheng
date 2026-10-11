@@ -340,6 +340,31 @@ else:
     s = s.replace(".x86_64.rpm", ".*.rpm")
     mark(rpm, s + marker, f"patched package-denial-rpm ({n} x86_64 rpm globs widened)")
 
+# ---------- tools/prepare-denial-plugin-kit ----------
+# Added upstream with the plugin kit (v0.4.4). It indexes the pinned release
+# checksum positionally, which crashes on the empty arm64 placeholder that is
+# seeded above. Same empty-baseline leniency the other helpers already carry.
+kit = repo / "tools" / "prepare-denial-plugin-kit"
+if patched(kit):
+    print("prepare-denial-plugin-kit: already patched")
+else:
+    s = kit.read_text()
+    kit_anchor = (
+        "    expected = (release / 'libflutter_engine.so.sha256').read_text().split()[0]\n"
+        "    if digest(engine / 'libflutter_engine.so') != expected:\n"
+        "        parser.error('local engine differs from the pinned release engine')\n"
+    )
+    if kit_anchor not in s:
+        sys.exit("patch: prepare-denial-plugin-kit engine sha anchor not found")
+    kit_repl = (
+        "    _pinned = (release / 'libflutter_engine.so.sha256').read_text().split()\n"
+        "    expected = _pinned[0] if _pinned else ''\n"
+        "    if expected and digest(engine / 'libflutter_engine.so') != expected:\n"
+        "        parser.error('local engine differs from the pinned release engine')\n"
+    )
+    s = s.replace(kit_anchor, kit_repl, 1)
+    mark(kit, s + marker, "patched prepare-denial-plugin-kit (lenient engine sha on empty baseline)")
+
 # ---------- packaging/fedora/denial.spec ----------
 spec = repo / "packaging" / "fedora" / "denial.spec"
 if patched(spec):
