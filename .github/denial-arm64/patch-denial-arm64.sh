@@ -291,16 +291,28 @@ else:
     )
     s = s.replace(root_anchor, root_anchor + host_cpu, 1)
 
-    settings_anchor = (
-        'SETTINGS_BUNDLE="${DENIAL_PC_SETTINGS_BUNDLE:-$ROOT/settings_app/build/linux/x64/release/bundle}"\n'
-    )
-    if settings_anchor not in s:
-        sys.exit("patch: stage-denial-runtime SETTINGS_BUNDLE anchor not found")
-    s = s.replace(
-        settings_anchor,
-        'SETTINGS_BUNDLE="${DENIAL_PC_SETTINGS_BUNDLE:-$ROOT/settings_app/build/linux/${HOST_CPU}/release/bundle}"\n',
-        1,
-    )
+    # Every auxiliary Flutter app is built for the host CPU. v0.4.4 added the
+    # plugin manager app and v0.5.0 added the polkit agent app; both kept the
+    # x64 literal while only the settings app was made host-aware, so staging
+    # looked for a bundle the ARM64 build never produced and exited without a
+    # message. Keep all three consistent instead of patching them one release
+    # behind.
+    for app in ("settings_app", "plugin_manager_app", "polkit_app"):
+        var = {
+            "settings_app": "SETTINGS_BUNDLE",
+            "plugin_manager_app": "PLUGIN_MANAGER_BUNDLE",
+            "polkit_app": "POLKIT_BUNDLE",
+        }[app]
+        app_anchor = (
+            f'{var}="${{DENIAL_PC_{var}:-$ROOT/{app}/build/linux/x64/release/bundle}}"\n'
+        )
+        if app_anchor not in s:
+            sys.exit(f"patch: stage-denial-runtime {var} anchor not found")
+        s = s.replace(
+            app_anchor,
+            f'{var}="${{DENIAL_PC_{var}:-$ROOT/{app}/build/linux/${{HOST_CPU}}/release/bundle}}"\n',
+            1,
+        )
 
     engine_anchor = 'engine_source_root="$ROOT/prebuilt/flutter-engine/linux-x64-release"\n'
     if engine_anchor not in s:
