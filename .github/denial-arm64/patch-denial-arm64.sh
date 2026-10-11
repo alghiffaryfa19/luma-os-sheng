@@ -291,16 +291,28 @@ else:
     )
     s = s.replace(root_anchor, root_anchor + host_cpu, 1)
 
-    settings_anchor = (
-        'SETTINGS_BUNDLE="${DENIAL_PC_SETTINGS_BUNDLE:-$ROOT/settings_app/build/linux/x64/release/bundle}"\n'
-    )
-    if settings_anchor not in s:
-        sys.exit("patch: stage-denial-runtime SETTINGS_BUNDLE anchor not found")
-    s = s.replace(
-        settings_anchor,
-        'SETTINGS_BUNDLE="${DENIAL_PC_SETTINGS_BUNDLE:-$ROOT/settings_app/build/linux/${HOST_CPU}/release/bundle}"\n',
-        1,
-    )
+    # Every auxiliary Flutter app is built for the host CPU. v0.4.4 added the
+    # plugin manager app and v0.5.0 added the polkit agent app; both kept the
+    # x64 literal while only the settings app was made host-aware, so staging
+    # looked for a bundle the ARM64 build never produced and exited without a
+    # message. Keep all three consistent instead of patching them one release
+    # behind.
+    for app in ("settings_app", "plugin_manager_app", "polkit_app"):
+        var = {
+            "settings_app": "SETTINGS_BUNDLE",
+            "plugin_manager_app": "PLUGIN_MANAGER_BUNDLE",
+            "polkit_app": "POLKIT_BUNDLE",
+        }[app]
+        app_anchor = (
+            f'{var}="${{DENIAL_PC_{var}:-$ROOT/{app}/build/linux/x64/release/bundle}}"\n'
+        )
+        if app_anchor not in s:
+            sys.exit(f"patch: stage-denial-runtime {var} anchor not found")
+        s = s.replace(
+            app_anchor,
+            f'{var}="${{DENIAL_PC_{var}:-$ROOT/{app}/build/linux/${{HOST_CPU}}/release/bundle}}"\n',
+            1,
+        )
 
     engine_anchor = 'engine_source_root="$ROOT/prebuilt/flutter-engine/linux-x64-release"\n'
     if engine_anchor not in s:
@@ -339,6 +351,31 @@ else:
     n = s.count(".x86_64.rpm")
     s = s.replace(".x86_64.rpm", ".*.rpm")
     mark(rpm, s + marker, f"patched package-denial-rpm ({n} x86_64 rpm globs widened)")
+
+# ---------- tools/prepare-denial-plugin-kit ----------
+# Added upstream with the plugin kit (v0.4.4). It indexes the pinned release
+# checksum positionally, which crashes on the empty arm64 placeholder that is
+# seeded above. Same empty-baseline leniency the other helpers already carry.
+kit = repo / "tools" / "prepare-denial-plugin-kit"
+if patched(kit):
+    print("prepare-denial-plugin-kit: already patched")
+else:
+    s = kit.read_text()
+    kit_anchor = (
+        "    expected = (release / 'libflutter_engine.so.sha256').read_text().split()[0]\n"
+        "    if digest(engine / 'libflutter_engine.so') != expected:\n"
+        "        parser.error('local engine differs from the pinned release engine')\n"
+    )
+    if kit_anchor not in s:
+        sys.exit("patch: prepare-denial-plugin-kit engine sha anchor not found")
+    kit_repl = (
+        "    _pinned = (release / 'libflutter_engine.so.sha256').read_text().split()\n"
+        "    expected = _pinned[0] if _pinned else ''\n"
+        "    if expected and digest(engine / 'libflutter_engine.so') != expected:\n"
+        "        parser.error('local engine differs from the pinned release engine')\n"
+    )
+    s = s.replace(kit_anchor, kit_repl, 1)
+    mark(kit, s + marker, "patched prepare-denial-plugin-kit (lenient engine sha on empty baseline)")
 
 # ---------- packaging/fedora/denial.spec ----------
 spec = repo / "packaging" / "fedora" / "denial.spec"
