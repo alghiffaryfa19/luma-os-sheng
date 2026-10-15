@@ -525,7 +525,7 @@ jobs:
               -H 'Accept: application/octet-stream' \
               > "denial-archives/$asset"
           done
-          unzip -qo denial-archives/*.zip -d rpms/
+          for archive in denial-archives/*.zip; do unzip -qo "$archive" -d rpms/; done
           rm -rf denial-archives
           ls -l rpms/denial*.rpm
           # The engine installs the compositor's data directory, so a missing
