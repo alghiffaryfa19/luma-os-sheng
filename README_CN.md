@@ -54,6 +54,7 @@
 | **GNOME Mobile** | 使用 @mobility/gnome-mobile COPR 的 GNOME Mobile（需要启用 Enable Third-Party）。🚫 fc43：混合构建（gsd=51~beta/mutter+shell=49^mobile），可能导致运行时问题。fc44/45：COPR 缺包时可能回退原版 GNOME——**本项目不负责**。仅 rawhide 完全支持。构建前请查看 [COPR Monitor](https://copr.fedorainfracloud.org/coprs/g/mobility/gnome-mobile/monitor/)。 | `true` / `false` | `false` |
 | **Plasma Mobile** | 使用 Plasma Mobile 界面而非 Plasma Desktop（仅 Desktop=KDE Plasma 时有效）。仅 Fedora 43 确认可用，fc44/45/rawhide 上崩溃。已将 SDDM 替换为 plasma-login-manager，可能解决此问题但未测试。 | `true` / `false` | `false` |
 | **Denial: Mobile mode** | Denial：使用 Mobile 模式（类似 Android 平板的 UI）而非 Desktop 模式（无屏幕键盘）（仅 Desktop=Denial 时有效）。 | `true` / `false` | `true` |
+| **Denial: 插件管理器** | 一并安装 Denial 的插件管理器与插件构建工具（仅 Desktop=Denial 时有效）。增加约 82 MB，本镜像未对其做过其他验证。 | `true` / `false` | `false` |
 | **Quiet Boot** | 启用 Plymouth 启动画面和安静启动信息 | `true` / `false` | `true` |
 | **Autologin** | 创建的用户是否自动登录 | `true` / `false` | `true` |
 | **Username** | 非 root 用户的用户名 | 字符串 | `username` |
@@ -134,7 +135,7 @@
 | [libssc](https://codeberg.org/DylanVanAssche/libssc) | Qualcomm Sensor Core 用户空间库 |
 | [iio-sensor-proxy](https://github.com/hadess/iio-sensor-proxy) | IIO 传感器代理守护进程 |
 | [sheng-gnome-fix](https://github.com/mumuxiao722/sheng-gnome-fix) | GNOME 自动旋转、电源键息屏锁屏、系统级禁用挂起 |
-| [Denial](https://github.com/denialwm/denial) | Flutter-native Wayland 合成器（ARM64 从源码自建；官方暂无 ARM64 二进制） |
+| [Denial](https://github.com/denialwm/denial) | Flutter-native Wayland 合成器（[ARM64 安装包](https://github.com/mumuxiao722/denial-arm64-builder) 由固定版本源码构建；上游未发布 ARM64 二进制） |
 | [sheng-sensors](#) | 设备特定传感器配置和 udev 规则 |
 | [alsa-xiaomi-sheng](#) | ALSA UCM2 音频配置 |
 

@@ -54,6 +54,7 @@ When you trigger the **Build Fedora RootFS** workflow via `workflow_dispatch`, t
 | **GNOME Mobile** | Use GNOME Mobile from @mobility/gnome-mobile COPR (requires Enable Third-Party). 🚫 fc43: mixed build (gsd=51~beta/mutter+shell=49^mobile), may cause runtime issues. fc44/45: may fall back to standard GNOME if COPR packages missing — **we are NOT responsible**. Only rawhide fully supported. Check [COPR Monitor](https://copr.fedorainfracloud.org/coprs/g/mobility/gnome-mobile/monitor/) before building. | `true` / `false` | `false` |
 | **Plasma Mobile** | Use Plasma Mobile shell instead of Plasma Desktop (only when Desktop=KDE Plasma). Only Fedora 43 confirmed working. Crashes on fc44/45/rawhide. SDDM has been replaced with plasma-login-manager which may fix this, but untested. | `true` / `false` | `false` |
 | **Denial: Mobile mode** | Denial: launch in Mobile mode (Android-like tablet UI) instead of Desktop mode (no on-screen keyboard) (only when Desktop=Denial). | `true` / `false` | `true` |
+| **Denial: Plugin manager** | Also install Denial's plugin manager and plugin build kit (only when Desktop=Denial). Adds about 82 MB, and nothing else in this image has been exercised against it. | `true` / `false` | `false` |
 | **Quiet Boot** | Enable Plymouth splash screen and quiet boot messages | `true` / `false` | `true` |
 | **Autologin** | Whether the created user should be logged in automatically | `true` / `false` | `true` |
 | **Username** | Username for the non-root user | string | `username` |
@@ -134,7 +135,7 @@ If you want to use a custom kernel instead of the prebuilt one:
 | [libssc](https://codeberg.org/DylanVanAssche/libssc) | Qualcomm Sensor Core userspace library |
 | [iio-sensor-proxy](https://github.com/hadess/iio-sensor-proxy) | IIO sensor proxy daemon |
 | [sheng-gnome-fix](https://github.com/mumuxiao722/sheng-gnome-fix) | GNOME auto-rotation, power-key display toggle, suspend disabled system-wide |
-| [Denial](https://github.com/denialwm/denial) | Flutter-native Wayland compositor (built from source for ARM64; no official ARM64 binaries) |
+| [Denial](https://github.com/denialwm/denial) | Flutter-native Wayland compositor ([ARM64 packages](https://github.com/mumuxiao722/denial-arm64-builder) built from a pinned upstream revision; upstream publishes no ARM64 binaries) |
 | [sheng-sensors](#) | Device-specific sensor configuration and udev rules |
 | [alsa-xiaomi-sheng](#) | ALSA UCM2 audio configuration |
 
