@@ -504,7 +504,7 @@ jobs:
           set -euo pipefail
           # Pinned rather than "latest": a release there would otherwise change
           # what this image ships, with nothing here recording that it did.
-          tag=v0.5.0
+          tag=v0.5.1
           # The compositor and its engine arrive together because neither
           # installs without the other; the plugin manager arrives apart
           # because it is optional.
@@ -735,7 +735,7 @@ jobs:
         if: ${{ inputs.desktop == 'GNOME' && inputs.gnome_mobile == false }}
         run: |
           sudo chroot "$ROOTFS_MOUNT" dnf install -y \
-            pipewire-pulseaudio pipewire-alsa pipewire-jack-audio-connection-kit \
+            pipewire-pulseaudio pipewire-alsa \
             gnome-shell gnome-session gnome-terminal \
             gdm gnome-control-center systemd-pam \
             xdg-desktop-portal-gnome xdg-desktop-portal-gtk \
@@ -756,7 +756,7 @@ jobs:
             exit 1
           }
           sudo chroot "$ROOTFS_MOUNT" dnf install -y \
-            pipewire-pulseaudio pipewire-alsa pipewire-jack-audio-connection-kit \
+            pipewire-pulseaudio pipewire-alsa \
             gnome-session gnome-terminal \
             gdm gnome-control-center systemd-pam \
             xdg-desktop-portal-gnome xdg-desktop-portal-gtk \
@@ -768,7 +768,7 @@ jobs:
         if: ${{ inputs.desktop == 'KDE Plasma' && inputs.plasma_mobile == false }}
         run: |
           sudo chroot "$ROOTFS_MOUNT" dnf install -y \
-            pipewire-pulseaudio pipewire-alsa pipewire-jack-audio-connection-kit \
+            pipewire-pulseaudio pipewire-alsa \
             plasma-desktop plasma-nm \
             plasma-login-manager kcm-plasmalogin konsole dolphin kate \
             kscreen bluedevil \
@@ -780,7 +780,7 @@ jobs:
         if: ${{ inputs.desktop == 'KDE Plasma' && inputs.plasma_mobile == true }}
         run: |
           sudo chroot "$ROOTFS_MOUNT" dnf install -y \
-            pipewire-pulseaudio pipewire-alsa pipewire-jack-audio-connection-kit \
+            pipewire-pulseaudio pipewire-alsa \
             plasma-mobile \
             plasma-login-manager kcm-plasmalogin konsole dolphin kate \
             systemd-pam \
@@ -791,7 +791,7 @@ jobs:
         if: ${{ inputs.desktop == 'Denial' }}
         run: |
           sudo chroot "$ROOTFS_MOUNT" dnf install -y \
-            pipewire-pulseaudio pipewire-alsa pipewire-jack-audio-connection-kit \
+            pipewire-pulseaudio pipewire-alsa \
             systemd-pam upower bluez
           echo "✓ Denial installed"
 
