@@ -50,6 +50,10 @@ on:
         description: 'Denial Mobile mode (Desktop = Denial only)'
         type: boolean
         default: true
+      denial_plugins:
+        description: 'Denial plugin manager (Desktop = Denial only)'
+        type: boolean
+        default: false
 
       autologin:
         description: 'Autologin'
@@ -452,117 +456,6 @@ jobs:
           retention-days: 3
           if-no-files-found: warn
 
-  # ==========================================================================
-  # Build Denial (source build, ARM64; see docs/BUILDING.md)
-  # ==========================================================================
-  build-denial:
-    name: "Build Denial (v0.5.0, ARM64)"
-    runs-on: ubuntu-24.04-arm
-    if: ${{ inputs.desktop == 'Denial' }}
-
-    env:
-      DENIAL_PC_DEPENDENCY_ROOT: ${{ github.workspace }}/.denial-cache/deps
-      DENIAL_PC_BUILD_ROOT: ${{ github.workspace }}/.denial-cache/pc-build
-      DENIAL_FLUTTER_ENGINE_CACHE_ROOT: ${{ github.workspace }}/.denial-cache/engine
-      DENIAL_FLUTTER_ENGINE_JOBS: 2
-
-    steps:
-      - name: "Checkout Repo"
-        uses: actions/checkout@v7
-
-      - name: "Checkout Denial (tag v0.5.0)"
-        uses: actions/checkout@v7
-        with:
-          repository: denialwm/denial
-          ref: v0.5.0
-          path: denial
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: "Restore Denial engine cache"
-        id: denial-cache-restore
-        uses: actions/cache/restore@v5
-        with:
-          # Keep this small (validated engine artifacts + state). The full
-          # .denial-cache (synchronized Flutter/Skia checkout + 3-mode build
-          # trees) blows past GitHub's per-cache limit and never saves, which
-          # silently caused a full ~2.5h engine rebuild on every run.
-          path: |
-            ${{ github.workspace }}/.denial-cache/engine/artifacts
-            ${{ github.workspace }}/.denial-cache/engine/state
-          key: denial-engine-cache-v0.5.0
-          # Cold cache on version change (no prefix fallback): a stale cache
-          # from a different Denial version silently seeded failed builds.
-          restore-keys: |
-            denial-engine-cache-v0.5.0
-
-      - name: "Install Build Tools"
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            git curl tar xz-utils zip unzip \
-            build-essential cmake ninja-build pkg-config \
-            clang llvm libclang-dev \
-            rustup \
-            libglvnd-dev libegl1-mesa-dev mesa-common-dev \
-            libdrm-dev libgbm-dev libgles-dev libsdl2-dev \
-            libinput-dev libudev-dev libxkbcommon-dev libseat-dev \
-            libglib2.0-dev libgtk-3-dev fontconfig \
-            libpolkit-agent-1-dev \
-            rpm rpm2cpio libarchive-tools
-
-      - name: "Add Rust toolchain"
-        run: |
-          rustup default stable
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-      - name: "Patch Denial tooling for ARM64"
-        run: bash .github/denial-arm64/patch-denial-arm64.sh denial
-
-      - name: "Denial doctor (host prerequisite check)"
-        run: ./tools/denial-pc doctor || true
-        working-directory: denial
-
-      - name: "Bootstrap Denial tooling"
-        run: ./tools/denial-pc bootstrap
-        working-directory: denial
-
-      - name: "Build Flutter engine (cacheable)"
-        run: ./tools/denial-flutter-engine build
-        working-directory: denial
-
-      - name: "Build Denial"
-        run: ./tools/denial-pc build
-        working-directory: denial
-
-      - name: "Package RPMs"
-        run: ./tools/denial-pc fedora-package
-        working-directory: denial
-
-      - name: "Upload Denial RPM"
-        uses: actions/upload-artifact@v7
-        with:
-          name: denial-rpm-arm64
-          path: ${{ github.workspace }}/.denial-cache/pc-build/packages/denial-[0-9]*.rpm
-          retention-days: 3
-          if-no-files-found: error
-
-      - name: "Upload Denial Flutter Engine RPM"
-        uses: actions/upload-artifact@v7
-        with:
-          name: denial-flutter-engine-rpm-arm64
-          path: ${{ github.workspace }}/.denial-cache/pc-build/packages/denial-flutter-engine-*.rpm
-          retention-days: 3
-          if-no-files-found: error
-
-      - name: "Save Denial engine cache"
-        if: ${{ always() && steps.denial-cache-restore.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            ${{ github.workspace }}/.denial-cache/engine/artifacts
-            ${{ github.workspace }}/.denial-cache/engine/state
-          key: ${{ steps.denial-cache-restore.outputs.cache-primary-key }}
 
   # ==========================================================================
   # Build RootFS
@@ -570,8 +463,8 @@ jobs:
   build-rootfs:
     name: "Build Fedora RootFS"
     runs-on: ubuntu-24.04-arm
-    needs: [build-rpms, build-kernel, build-denial]
-    if: ${{ !cancelled() && needs.build-rpms.result == 'success' && (needs.build-kernel.result == 'success' || needs.build-kernel.result == 'skipped') && (needs.build-denial.result == 'success' || needs.build-denial.result == 'skipped') }}
+    needs: [build-rpms, build-kernel]
+    if: ${{ !cancelled() && needs.build-rpms.result == 'success' && (needs.build-kernel.result == 'success' || needs.build-kernel.result == 'skipped') }}
 
     env:
       ROOTFS_MOUNT: /mnt/rootfs
@@ -601,9 +494,50 @@ jobs:
             --pattern 'sheng-gnome-fix-*.noarch.rpm' \
             --dir rpms/ \
             --clobber
-          echo "✓ sheng-gnome-fix RPM downloaded from sheng-gnome-fix Release"
+            echo "✓ sheng-gnome-fix RPM downloaded from sheng-gnome-fix Release"
+          env:
+            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Download Denial RPMs (from denial-arm64-builder Release)"
+        if: ${{ inputs.desktop == 'Denial' }}
+        run: |
+          set -euo pipefail
+          # Pinned rather than "latest": a release there would otherwise change
+          # what this image ships, with nothing here recording that it did.
+          tag=v0.5.0
+          # The compositor and its engine arrive together because neither
+          # installs without the other; the plugin manager arrives apart
+          # because it is optional.
+          assets=(denial-rpm-fedora-arm64.zip)
+          if [[ "${{ inputs.denial_plugins }}" == "true" ]]; then
+            assets+=(denial-rpm-plugin-manager-fedora-arm64.zip)
+          fi
+
+          mkdir -p denial-archives rpms
+          for asset in "${assets[@]}"; do
+            id=$(gh api "repos/mumuxiao722/denial-arm64-builder/releases/tags/$tag" \
+              --jq ".assets[] | select(.name == \"$asset\") | .id")
+            if [[ -z "$id" ]]; then
+              echo "::error::$asset is not in the $tag release of denial-arm64-builder"
+              exit 1
+            fi
+            gh api "repos/mumuxiao722/denial-arm64-builder/releases/assets/$id" \
+              -H 'Accept: application/octet-stream' \
+              > "denial-archives/$asset"
+          done
+          for archive in denial-archives/*.zip; do unzip -qo "$archive" -d rpms/; done
+          rm -rf denial-archives
+          ls -l rpms/denial*.rpm
+          # The engine installs the compositor's data directory, so a missing
+          # one of these only shows up much later as a broken session.
+          for required in 'rpms/denial-[0-9]*.rpm' 'rpms/denial-flutter-engine-*.rpm'; do
+            compgen -G "$required" >/dev/null \
+              || { echo "::error::no match for $required"; exit 1; }
+          done
+          echo "✓ Denial RPMs ready"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
       - name: "Download Kernel Artifact (custom_build)"
         if: ${{ inputs.kernel_source == 'custom_build' }}
@@ -759,8 +693,9 @@ jobs:
 
       - name: "Install Custom RPMs"
         run: |
-          # xiaomi-sheng + sheng-gnome-fix (GNOME, from sheng-gnome-fix Release) + denial
-          # (built by build-denial when desktop=Denial), all merged into rpms/.
+          # xiaomi-sheng + sheng-gnome-fix (GNOME, from its Release) + denial
+          # (from the denial-arm64-builder Release when desktop=Denial), all
+          # merged into rpms/.
           cp rpms/*.rpm "$ROOTFS_MOUNT/tmp/"
           sudo chroot "$ROOTFS_MOUNT" bash -c "dnf install -y /tmp/*.rpm"
           sudo rm -f "$ROOTFS_MOUNT/tmp/"*.rpm
