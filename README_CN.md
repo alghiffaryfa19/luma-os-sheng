@@ -51,7 +51,7 @@
 | **Fedora Version** | 要安装的 Fedora 版本 | `43` / `44` / `45` / `rawhide` | `44` |
 | **Enable Third-Party** | 启用第三方仓库 | `true` / `false` | `false` |
 | **Desktop** | 要安装的桌面环境 | `GNOME` / `KDE Plasma` / `Denial` / `server` | `GNOME` |
-| **GNOME Mobile** | 使用 @mobility/gnome-mobile COPR 的 GNOME Mobile（需要启用 Enable Third-Party）。🚫 fc43：混合构建（gsd=51~beta/mutter+shell=49^mobile），可能导致运行时问题。fc44/45：COPR 缺包时可能回退原版 GNOME——**本项目不负责**。仅 rawhide 完全支持。构建前请查看 [COPR Monitor](https://copr.fedorainfracloud.org/coprs/g/mobility/gnome-mobile/monitor/)。 | `true` / `false` | `false` |
+| **GNOME Mobile** | 使用 @mobility/gnome-mobile COPR 的 GNOME Mobile（需要启用 Enable Third-Party）。各 Fedora 版本的包可用性不同——详见下方**严重警告**，构建前请查看 [COPR Monitor](https://copr.fedorainfracloud.org/coprs/g/mobility/gnome-mobile/monitor/)。 | `true` / `false` | `false` |
 | **Plasma Mobile** | 使用 Plasma Mobile 界面而非 Plasma Desktop（仅 Desktop=KDE Plasma 时有效）。仅 Fedora 43 确认可用，fc44/45/rawhide 上崩溃。已将 SDDM 替换为 plasma-login-manager，可能解决此问题但未测试。 | `true` / `false` | `false` |
 | **Denial: Mobile mode** | Denial：使用 Mobile 模式（类似 Android 平板的 UI）而非 Desktop 模式（无屏幕键盘）（仅 Desktop=Denial 时有效）。 | `true` / `false` | `true` |
 | **Denial: 插件管理器** | 一并安装 Denial 的插件管理器与插件构建工具（仅 Desktop=Denial 时有效）。增加约 82 MB，本镜像未对其做过其他验证。 | `true` / `false` | `false` |
@@ -66,11 +66,12 @@
 
 > **🚫 严重警告**
 > 
-> - **Fedora 43**：gsd-mobile 49 已从 COPR **过期**。在 fc43 上选择 GNOME Mobile 将导致**混合构建**：gsd 版本为 51~beta，但 mutter+shell 版本为 49^mobile。这种版本不匹配**可能导致运行时问题或不稳定**。使用风险自负。
-> - **Fedora 44 / 45**：截至 2026 年 9 月，COPR 可能**没有这些版本的包**。如果缺少包，构建将**回退到原版 Fedora GNOME**（非 GNOME Mobile）。**本项目不负责** fc44/45 构建后发现不是 GNOME Mobile 的情况。
+> - **Fedora 43**：gsd-mobile 49 已从 COPR **过期**，且最新的 mutter 构筑**失败**。仓库中仍是 gsd=51~beta 搭配 mutter+shell=49^mobile（2026-03 构建），因此在 fc43 上选择 GNOME Mobile 会得到**混合构建**。这种版本不匹配**可能导致运行时问题或不稳定**。使用风险自负。
+> - **Fedora 44**：仅发布了 gnome-settings-daemon（51~beta）；gnome-shell 与 mutter **缺失**（最新 mutter 构筑失败，gnome-shell 构筑 forked）。GNOME Mobile 无法组装，构建会**回退到原版 Fedora GNOME**。**本项目不负责** fc44 构建后发现不是 GNOME Mobile 的情况。
+> - **Fedora 45 / rawhide**：完整移动套件——gnome-shell、mutter、gnome-settings-daemon **51.1.mobile.3**（2026-10-20 构建）——在 aarch64 与 x86_64 上均可用。
 > - **如果不确定**，请先查看 [COPR Monitor](https://copr.fedorainfracloud.org/coprs/g/mobility/gnome-mobile/monitor/) 确认包是否可用。
 > 
-> **目前只有 rawhide 完全支持 GNOME Mobile。**
+> **截至 2026 年 10 月，Fedora 45 与 rawhide 完全支持 GNOME Mobile。**
 
 ### 内核设置
 
@@ -79,7 +80,7 @@
 | **Kernel Source** | 使用预构建内核还是从源码构建 | `prebuilt` / `custom_build` | `prebuilt` |
 | **Kernel Prebuilt Source** | 预构建内核来源（仅 prebuilt 时） | `upstream` / `own` | `upstream` |
 | **Kernel Repo URL** | 内核源码仓库地址（仅 custom_build 时） | 有效的 Git URL | `https://github.com/ianchb/sm8550-mainline` |
-| **Kernel Branch** | 内核分支名或 release tag（custom_build: 上游分支名；prebuilt: 要下载的 release tag） | 分支名 / tag | `sheng-7.2.6` |
+| **Kernel Branch** | 内核分支名或 release tag（custom_build: 上游分支名；prebuilt: 要下载的 release tag） | 分支名 / tag | `sheng-7.3.0` |
 | **Kernel Config** | 仓库中的配置文件路径（仅 custom_build 时） | 文件路径 | `sm8550.config` |
 
 ### 固件设置
@@ -190,11 +191,9 @@ fastboot reboot
 
 ### GNOME Mobile
 
-1. **🚫 Fedora 43：gsd-mobile 49 已过期。** 在 fc43 上选择 GNOME Mobile 将导致混合构建（gsd=51~beta / mutter+shell=49^mobile）。版本不匹配可能导致运行时问题或不稳定。使用风险自负。
-2. **🚫 Fedora 44/45：COPR 可能没有这些版本的包。** 如果缺少包，构建将回退到原版 Fedora GNOME（非 GNOME Mobile）。本项目不负责 fc44/45 构建后发现不是 GNOME Mobile 的情况。构建前请查看 [COPR Monitor](https://copr.fedorainfracloud.org/coprs/g/mobility/gnome-mobile/monitor/)。
-3. **目前只有 rawhide 完全支持 GNOME Mobile**（截至 2026 年 9 月）。
-4. **随机崩溃回到 GDM** – GNOME Mobile 可能会随机崩溃并返回 GDM 登录界面。这是上游问题，在 Debian 上也可复现。
-5. **GDM 密码输入框不可见** – GDM 登录界面的密码输入框可能显示为空白，但实际可以输入。这也是上游问题，在 Debian 上同样存在。
+1. **各 Fedora 版本的包状态不同** – 详见 [Advanced Configuration](#advanced-configuration) 下方的**严重警告**，构建前请查看 [COPR Monitor](https://copr.fedorainfracloud.org/coprs/g/mobility/gnome-mobile/monitor/)。截至 2026 年 10 月，Fedora 45 与 rawhide 完全支持，Fedora 43 与 44 不支持。
+2. **随机崩溃回到 GDM** – GNOME Mobile 可能会随机崩溃并返回 GDM 登录界面。这是上游问题，在 Debian 上也可复现。
+3. **GDM 密码输入框不可见** – GDM 登录界面的密码输入框可能显示为空白，但实际可以输入。这也是上游问题，在 Debian 上同样存在。
 
 ### KDE Plasma Mobile
 
