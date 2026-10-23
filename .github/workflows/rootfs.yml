@@ -488,15 +488,15 @@ jobs:
 
       - name: "Download sheng-gnome-fix RPM (GNOME Auto-Rotation, Power Key & Suspend)"
         if: ${{ inputs.desktop == 'GNOME' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release download \
             --repo mumuxiao722/sheng-gnome-fix \
             --pattern 'sheng-gnome-fix-*.noarch.rpm' \
             --dir rpms/ \
             --clobber
-            echo "✓ sheng-gnome-fix RPM downloaded from sheng-gnome-fix Release"
-          env:
-            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "✓ sheng-gnome-fix RPM downloaded from sheng-gnome-fix Release"
 
       - name: "Download Denial RPMs (from denial-arm64-builder Release)"
         if: ${{ inputs.desktop == 'Denial' }}
