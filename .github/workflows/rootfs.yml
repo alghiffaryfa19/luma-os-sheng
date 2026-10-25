@@ -1,62 +1,13 @@
 # Copyright (C) 2026 mumuxiao722 <zy349931@163.com>
 # Licensed under the GPL-3.0-or-later. See LICENSE for details.
 
-name: Build Fedora RootFS
+name: Build Luma Mobile RootFS
 
 on:
   workflow_dispatch:
     inputs:
       read_known_issues:
         description: '⚠️  Please read the "Known Issues" section in README.md before building'
-        type: boolean
-        default: true
-
-      fedora_version:
-        description: 'Fedora Version'
-        type: choice
-        options:
-          - 43
-          - 44
-          - 45
-          - rawhide
-        default: '44'
-
-      enable_third_party:
-        description: 'Enable third-party repositories'
-        type: boolean
-        default: false
-
-      desktop:
-        description: 'server = no DE. ⚠️ Denial needs a terminal: install via extra_packages'
-        type: choice
-        options:
-          - 'GNOME'
-          - 'KDE Plasma'
-          - 'Denial'
-          - 'server'
-        default: 'GNOME'
-
-      gnome_mobile:
-        description: 'GNOME Mobile (requires Enable Third-Party)'
-        type: boolean
-        default: false
-
-      plasma_mobile:
-        description: 'Plasma Mobile shell (Desktop = KDE Plasma only)'
-        type: boolean
-        default: false
-
-      denial_mobile:
-        description: 'Denial Mobile mode (Desktop = Denial only)'
-        type: boolean
-        default: true
-      denial_plugins:
-        description: 'Denial plugin manager (Desktop = Denial only)'
-        type: boolean
-        default: false
-
-      autologin:
-        description: 'Autologin'
         type: boolean
         default: true
 
@@ -68,7 +19,7 @@ on:
       hostname:
         description: 'Hostname'
         type: string
-        default: 'fedora-sheng'
+        default: 'luma-sheng'
 
       language:
         description: 'System language'
@@ -117,7 +68,7 @@ on:
         default: true
 
       plymouth_theme:
-        description: 'Plymouth theme (requires quiet_boot=true). Default = spinner for GNOME and Denial, breeze for KDE'
+        description: 'Plymouth theme (requires quiet_boot=true)'
         type: choice
         options:
           - 'default'
@@ -313,15 +264,10 @@ jobs:
       - name: "Checkout Repo"
         uses: actions/checkout@v7
 
-      - name: "Build RPMs in Fedora Container"
+      - name: "Build RPMs in Fedora 44 Container"
         run: |
-          FEDORA_VERSION=${{ inputs.fedora_version }}
-          if [ "$FEDORA_VERSION" = "rawhide" ]; then
-            RPM_SUFFIX="fc46"
-          else
-            RPM_SUFFIX="fc${FEDORA_VERSION}"
-          fi
-          echo "RPM_SUFFIX=${RPM_SUFFIX}" >> $GITHUB_ENV
+          FEDORA_VERSION=44
+          echo "RPM_SUFFIX=fc44" >> $GITHUB_ENV
 
           podman pull registry.fedoraproject.org/fedora:${FEDORA_VERSION}
 
@@ -461,14 +407,13 @@ jobs:
   # Build RootFS
   # ==========================================================================
   build-rootfs:
-    name: "Build Fedora RootFS"
+    name: "Build Luma Mobile RootFS"
     runs-on: ubuntu-24.04-arm
     needs: [build-rpms, build-kernel]
     if: ${{ !cancelled() && needs.build-rpms.result == 'success' && (needs.build-kernel.result == 'success' || needs.build-kernel.result == 'skipped') }}
 
     env:
       ROOTFS_MOUNT: /mnt/rootfs
-      IMAGE_SIZE: 10G
 
     steps:
       - name: "Checkout Repo"
@@ -477,7 +422,7 @@ jobs:
       - name: "Install Build Tools"
         run: |
           sudo apt-get update
-          sudo apt-get install -y tar xz-utils e2fsprogs dnf
+          sudo apt-get install -y tar xz-utils e2fsprogs dnf zstd android-sdk-libsparse-utils
           echo "✓ Build tools installed"
 
       - name: "Download RPM Artifacts"
@@ -485,59 +430,6 @@ jobs:
         with:
           path: rpms/
           merge-multiple: true
-
-      - name: "Download sheng-gnome-fix RPM (GNOME Auto-Rotation, Power Key & Suspend)"
-        if: ${{ inputs.desktop == 'GNOME' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release download \
-            --repo mumuxiao722/sheng-gnome-fix \
-            --pattern 'sheng-gnome-fix-*.noarch.rpm' \
-            --dir rpms/ \
-            --clobber
-          echo "✓ sheng-gnome-fix RPM downloaded from sheng-gnome-fix Release"
-
-      - name: "Download Denial RPMs (from denial-arm64-builder Release)"
-        if: ${{ inputs.desktop == 'Denial' }}
-        run: |
-          set -euo pipefail
-          # Pinned rather than "latest": a release there would otherwise change
-          # what this image ships, with nothing here recording that it did.
-          tag=v0.5.1
-          # The compositor and its engine arrive together because neither
-          # installs without the other; the plugin manager arrives apart
-          # because it is optional.
-          assets=(denial-rpm-fedora-arm64.zip)
-          if [[ "${{ inputs.denial_plugins }}" == "true" ]]; then
-            assets+=(denial-rpm-plugin-manager-fedora-arm64.zip)
-          fi
-
-          mkdir -p denial-archives rpms
-          for asset in "${assets[@]}"; do
-            id=$(gh api "repos/mumuxiao722/denial-arm64-builder/releases/tags/$tag" \
-              --jq ".assets[] | select(.name == \"$asset\") | .id")
-            if [[ -z "$id" ]]; then
-              echo "::error::$asset is not in the $tag release of denial-arm64-builder"
-              exit 1
-            fi
-            gh api "repos/mumuxiao722/denial-arm64-builder/releases/assets/$id" \
-              -H 'Accept: application/octet-stream' \
-              > "denial-archives/$asset"
-          done
-          for archive in denial-archives/*.zip; do unzip -qo "$archive" -d rpms/; done
-          rm -rf denial-archives
-          ls -l rpms/denial*.rpm
-          # The engine installs the compositor's data directory, so a missing
-          # one of these only shows up much later as a broken session.
-          for required in 'rpms/denial-[0-9]*.rpm' 'rpms/denial-flutter-engine-*.rpm'; do
-            compgen -G "$required" >/dev/null \
-              || { echo "::error::no match for $required"; exit 1; }
-          done
-          echo "✓ Denial RPMs ready"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 
       - name: "Download Kernel Artifact (custom_build)"
         if: ${{ inputs.kernel_source == 'custom_build' }}
@@ -588,33 +480,6 @@ jobs:
           esac
           echo "✓ Partition label set"
 
-      - name: "Parse DE Name"
-        id: de
-        run: |
-          case "${{ inputs.desktop }}" in
-            'GNOME')
-              if [ "${{ inputs.gnome_mobile }}" = "true" ]; then
-                echo "name=gnome-mobile" >> $GITHUB_OUTPUT
-              else
-                echo "name=gnome" >> $GITHUB_OUTPUT
-              fi
-              ;;
-            'KDE Plasma')
-              if [ "${{ inputs.plasma_mobile }}" = "true" ]; then
-                echo "name=kde-mobile" >> $GITHUB_OUTPUT
-              else
-                echo "name=kde" >> $GITHUB_OUTPUT
-              fi
-              ;;
-            'Denial')
-              echo "name=denial" >> $GITHUB_OUTPUT
-              ;;
-            'server')
-              echo "name=server" >> $GITHUB_OUTPUT
-              ;;
-          esac
-          echo "✓ DE name set"
-
       - name: "Parse Kernel Source"
         id: kernel
         run: |
@@ -639,47 +504,20 @@ jobs:
           fi
           echo "✓ Arguments verified"
 
-      - name: "Create RootFS Image"
+      - name: "Download and Convert Alpha1 RootFS"
         run: |
-          truncate -s "$IMAGE_SIZE" rootfs.img
-          mkfs.ext4 rootfs.img
-          echo "✓ RootFS image created (${IMAGE_SIZE})"
+          IMAGE_URL="https://simplyluma.com/get/mobile/fp6/alpha1/system"
+          curl -fL --retry 3 --retry-delay 2 "$IMAGE_URL" -o rootfs.sparse.zst
+          zstd -d rootfs.sparse.zst -o rootfs.sparse
+          simg2img rootfs.sparse rootfs.img
+          rm -f rootfs.sparse.zst rootfs.sparse
+          echo "✓ Alpha1 RootFS downloaded and converted"
 
       - name: "Mount RootFS Image"
         run: |
           sudo mkdir -p "$ROOTFS_MOUNT"
           sudo mount -o loop rootfs.img "$ROOTFS_MOUNT"
           echo "✓ RootFS image mounted at $ROOTFS_MOUNT"
-
-      - name: "Install Fedora via DNF"
-        run: |
-          FEDORA_VERSION=${{ inputs.fedora_version }}
-          sudo podman run --rm \
-            -v "/mnt/rootfs:/mnt/rootfs" \
-            registry.fedoraproject.org/fedora:${FEDORA_VERSION} \
-            dnf \
-              --installroot=/mnt/rootfs \
-              --releasever=${FEDORA_VERSION} \
-              --use-host-config \
-              --setopt=install_weak_deps=False \
-              --setopt=tsflags=nodocs \
-              install -y \
-              @core \
-              systemd systemd-sysv \
-              sudo curl \
-              NetworkManager NetworkManager-wifi NetworkManager-tui \
-              openssh-server \
-              wpa_supplicant dbus \
-              ca-certificates \
-              iw \
-              lm_sensors \
-              wireless-regdb \
-              glib2 \
-              libqmi \
-              libmbim \
-              polkit \
-              cracklib-dicts
-          echo "✓ DNF installroot complete"
 
       - name: "Mount Virtual File Systems"
         run: |
@@ -691,11 +529,29 @@ jobs:
           sudo cp /etc/resolv.conf "$ROOTFS_MOUNT/etc/resolv.conf"
           echo "✓ Virtual file systems mounted"
 
+      - name: "Remove Bundled Kernel and Firmware"
+        run: |
+          sudo chroot "$ROOTFS_MOUNT" bash -euc '
+            mapfile -t packages < <(rpm -qa --qf "%{NAME}\\n" | grep -E "^(kernel(-.*)?|.*firmware.*)$" || true)
+            if ((${#packages[@]})); then
+              dnf remove -y "${packages[@]}"
+            fi
+            for directory in /boot /lib/modules /lib/firmware; do
+              mkdir -p "$directory"
+              find "$directory" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+            done
+            for directory in /boot /lib/modules /lib/firmware; do
+              if find "$directory" -mindepth 1 -print -quit | grep -q .; then
+                echo "::error::${directory} was not emptied"
+                exit 1
+              fi
+            done
+          '
+          echo "✓ Bundled kernel and firmware removed"
+
       - name: "Install Custom RPMs"
         run: |
-          # xiaomi-sheng + sheng-gnome-fix (GNOME, from its Release) + denial
-          # (from the denial-arm64-builder Release when desktop=Denial), all
-          # merged into rpms/.
+          # Install the device-specific packages into the generic Alpha1 rootfs.
           cp rpms/*.rpm "$ROOTFS_MOUNT/tmp/"
           sudo chroot "$ROOTFS_MOUNT" bash -c "dnf install -y /tmp/*.rpm"
           sudo rm -f "$ROOTFS_MOUNT/tmp/"*.rpm
@@ -719,91 +575,17 @@ jobs:
       - name: "Compute Effective quiet_boot"
         id: quiet
         run: |
-          if [[ "${{ inputs.quiet_boot }}" == "true" && "${{ inputs.desktop }}" != "server" ]]; then
+          if [[ "${{ inputs.quiet_boot }}" == "true" ]]; then
             echo "enabled=true" >> $GITHUB_OUTPUT
           else
             echo "enabled=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: "Enable Third-Party Repositories"
-        if: ${{ inputs.enable_third_party == true }}
-        run: |
-          sudo chroot "$ROOTFS_MOUNT" dnf install -y dnf-plugins-core
-          echo "✓ Third-party repository support enabled"
-
-      - name: "Install GNOME"
-        if: ${{ inputs.desktop == 'GNOME' && inputs.gnome_mobile == false }}
-        run: |
-          sudo chroot "$ROOTFS_MOUNT" dnf install -y \
-            pipewire-pulseaudio pipewire-alsa \
-            gnome-shell gnome-session gnome-terminal \
-            gdm gnome-control-center systemd-pam \
-            xdg-desktop-portal-gnome xdg-desktop-portal-gtk \
-            xorg-x11-server-Xwayland \
-            nautilus gvfs-mtp
-          echo "✓ GNOME installed"
-
-      - name: "Install GNOME Mobile"
-        if: ${{ inputs.desktop == 'GNOME' && inputs.gnome_mobile == true }}
-        run: |
-          echo "::warning::GNOME Mobile requires mutter & gnome-settings-daemon from @mobility/gnome-mobile COPR."
-          echo "::warning::Check build status: https://copr.fedorainfracloud.org/coprs/g/mobility/gnome-mobile/monitor/"
-          sudo chroot "$ROOTFS_MOUNT" dnf copr enable -y @mobility/gnome-mobile
-          sudo chroot "$ROOTFS_MOUNT" dnf install -y mutter gnome-settings-daemon gnome-shell || {
-            echo "::error::GNOME Mobile packages failed to install."
-            echo "::error::Packages may not be built for Fedora ${{ inputs.fedora_version }}."
-            echo "::error::Check: https://copr.fedorainfracloud.org/coprs/g/mobility/gnome-mobile/monitor/"
-            exit 1
-          }
-          sudo chroot "$ROOTFS_MOUNT" dnf install -y \
-            pipewire-pulseaudio pipewire-alsa \
-            gnome-session gnome-terminal \
-            gdm gnome-control-center systemd-pam \
-            xdg-desktop-portal-gnome xdg-desktop-portal-gtk \
-            xorg-x11-server-Xwayland \
-            nautilus gvfs-mtp
-          echo "✓ GNOME Mobile installed"
-
-      - name: "Install KDE Plasma"
-        if: ${{ inputs.desktop == 'KDE Plasma' && inputs.plasma_mobile == false }}
-        run: |
-          sudo chroot "$ROOTFS_MOUNT" dnf install -y \
-            pipewire-pulseaudio pipewire-alsa \
-            plasma-desktop plasma-nm \
-            plasma-login-manager kcm-plasmalogin konsole dolphin kate \
-            kscreen bluedevil \
-            systemd-pam \
-            xdg-desktop-portal-kde kio-admin
-          echo "✓ KDE Plasma installed"
-
-      - name: "Install KDE Plasma Mobile"
-        if: ${{ inputs.desktop == 'KDE Plasma' && inputs.plasma_mobile == true }}
-        run: |
-          sudo chroot "$ROOTFS_MOUNT" dnf install -y \
-            pipewire-pulseaudio pipewire-alsa \
-            plasma-mobile \
-            plasma-login-manager kcm-plasmalogin konsole dolphin kate \
-            systemd-pam \
-            xdg-desktop-portal-kde kio-admin
-          echo "✓ KDE Plasma Mobile installed"
-
-      - name: "Install Denial"
-        if: ${{ inputs.desktop == 'Denial' }}
-        run: |
-          sudo chroot "$ROOTFS_MOUNT" dnf install -y \
-            pipewire-pulseaudio pipewire-alsa \
-            systemd-pam upower bluez
-          echo "✓ Denial installed"
-
       - name: "Install Plymouth"
         if: ${{ steps.quiet.outputs.enabled == 'true' }}
         run: |
           if [[ "${{ inputs.plymouth_theme }}" == "default" ]]; then
-            if [[ "${{ inputs.desktop }}" == "KDE Plasma" ]]; then
-              THEME_PKG="plymouth-theme-breeze"
-            else
-              THEME_PKG="plymouth-theme-spinner"
-            fi
+            THEME_PKG="plymouth-theme-spinner"
           elif [[ "${{ inputs.plymouth_theme }}" == "none" ]]; then
             THEME_PKG=""
           else
@@ -813,57 +595,8 @@ jobs:
           if [[ -n "$THEME_PKG" ]]; then
             INSTALL_PKGS="$INSTALL_PKGS $THEME_PKG"
           fi
-          if [[ "${{ inputs.desktop }}" == "KDE Plasma" ]]; then
-            INSTALL_PKGS="$INSTALL_PKGS plymouth-kcm"
-          fi
           sudo chroot "$ROOTFS_MOUNT" dnf install -y $INSTALL_PKGS
           echo "✓ Plymouth installed with ${THEME_PKG:-no theme}"
-
-      - name: "Configure Display Manager"
-        run: |
-          if [[ "${{ inputs.desktop }}" == "GNOME" ]]; then
-            sudo chroot "$ROOTFS_MOUNT" systemctl enable gdm
-          elif [[ "${{ inputs.desktop }}" == "KDE Plasma" ]]; then
-            sudo chroot "$ROOTFS_MOUNT" systemctl enable plasmalogin.service
-          fi
-          echo "✓ Display manager configured"
-
-      - name: "Configure Autologin"
-        if: ${{ inputs.autologin == true && inputs.desktop != 'server' }}
-        run: |
-          USERNAME="${{ inputs.username }}"
-          if [[ "${{ inputs.desktop }}" == "GNOME" ]]; then
-            sudo mkdir -p "$ROOTFS_MOUNT/etc/gdm"
-            printf '[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=%s\n' "$USERNAME" | \
-              sudo tee "$ROOTFS_MOUNT/etc/gdm/custom.conf" > /dev/null
-            echo "✓ GDM autologin configured"
-          elif [[ "${{ inputs.desktop }}" == "KDE Plasma" ]]; then
-            if [[ "${{ inputs.plasma_mobile }}" == "true" ]]; then
-              SESSION="plasma-mobile"
-            else
-              SESSION="plasma"
-            fi
-            if [[ "${{ inputs.autologin }}" == "true" ]]; then
-              sudo mkdir -p "$ROOTFS_MOUNT/etc/plasmalogin.conf.d"
-              printf '[Autologin]\nUser=%s\nSession=%s.desktop\n' "$USERNAME" "$SESSION" | \
-                sudo tee "$ROOTFS_MOUNT/etc/plasmalogin.conf.d/autologin.conf" > /dev/null
-              echo "✓ Plasma Login configured (session: $SESSION, autologin: $USERNAME)"
-            else
-              echo "✓ Plasma Login configured (autologin disabled; session selected at login)"
-            fi
-          elif [[ "${{ inputs.desktop }}" == "Denial" ]]; then
-            sudo mkdir -p "$ROOTFS_MOUNT/etc/systemd/system/getty@tty1.service.d"
-            printf '[Service]\nExecStart=\nExecStart=-/usr/sbin/agetty --noreset --noclear --autologin %s - $TERM\n' \
-              "$USERNAME" | \
-              sudo tee "$ROOTFS_MOUNT/etc/systemd/system/getty@tty1.service.d/autologin.conf" > /dev/null
-            echo "✓ Denial getty autologin configured for $USERNAME"
-          fi
-
-      - name: "Set Graphical Target"
-        if: ${{ inputs.desktop != 'server' }}
-        run: |
-          sudo chroot "$ROOTFS_MOUNT" systemctl set-default graphical.target
-          echo "✓ graphical.target set as default"
 
       - name: "Set Hostname"
         run: |
@@ -889,11 +622,16 @@ jobs:
 
       - name: "Create User"
         run: |
-          sudo chroot "$ROOTFS_MOUNT" useradd \
-            -m -s /bin/bash \
-            -G wheel \
-            "${{ inputs.username }}"
-          echo "✓ User ${{ inputs.username }} created"
+          if sudo chroot "$ROOTFS_MOUNT" id -u "${{ inputs.username }}" >/dev/null 2>&1; then
+            sudo chroot "$ROOTFS_MOUNT" usermod -aG wheel -s /bin/bash "${{ inputs.username }}"
+            echo "✓ Existing user ${{ inputs.username }} configured"
+          else
+            sudo chroot "$ROOTFS_MOUNT" useradd \
+              -m -s /bin/bash \
+              -G wheel \
+              "${{ inputs.username }}"
+            echo "✓ User ${{ inputs.username }} created"
+          fi
 
       - name: "Set Passwords"
         env:
@@ -910,43 +648,6 @@ jobs:
             sudo chroot "$ROOTFS_MOUNT" chpasswd
           echo "✓ Passwords set"
 
-      - name: "Configure Denial Session"
-        if: ${{ inputs.desktop == 'Denial' }}
-        run: |
-          USERNAME="${{ inputs.username }}"
-          if [[ "${{ inputs.autologin }}" == "true" ]]; then
-            SESSION_FLAGS="--start-locked"
-          else
-            SESSION_FLAGS=""
-          fi
-          if [[ "${{ inputs.denial_mobile }}" == "true" ]]; then
-            SHELL_PROFILE="mobile"
-          else
-            SHELL_PROFILE="desktop"
-          fi
-          sudo tee "$ROOTFS_MOUNT/home/$USERNAME/.bash_profile" > /dev/null <<EOF
-          # .bash_profile
-
-          # Get the aliases and functions
-          if [ -f ~/.bashrc ]; then
-              . ~/.bashrc
-          fi
-
-          export DENIA_SHELL_PROFILE=$SHELL_PROFILE
-
-          # Start Denial compositor on the autologin console tty
-          if [ "\$(tty)" = "/dev/tty1" ] && [ -z "\${SSH_CONNECTION:-}" ] && [ -z "\${WAYLAND_DISPLAY:-}" ]; then
-            exec denial-session $SESSION_FLAGS
-          fi
-          EOF
-          sudo chroot "$ROOTFS_MOUNT" chown "$USERNAME:wheel" "/home/$USERNAME/.bash_profile"
-          # No HandlePowerKey= override: Denial takes the handle-power-key
-          # inhibitor and drives the action from its own settings. Without it
-          # logind keeps its poweroff default, so a missed inhibitor powers the
-          # device off instead of performing an action the user never chose.
-          sudo chroot "$ROOTFS_MOUNT" systemctl enable bluetooth
-          echo "✓ Denial session configured on tty1 (shell: $SHELL_PROFILE, autologin lock: ${{ inputs.autologin }}, power key: Denial settings)"
-
       - name: "Enable Services"
         run: |
           sudo chroot "$ROOTFS_MOUNT" systemctl enable NetworkManager
@@ -959,11 +660,6 @@ jobs:
           sudo chroot "$ROOTFS_MOUNT" systemctl enable adsprpcd-sensorspd
           sudo chroot "$ROOTFS_MOUNT" systemctl enable sheng-audio-init.service
           echo "✓ Services enabled"
-
-      - name: "Enable sheng-gnome-fix (GNOME auto-rotation + power key)"
-        if: ${{ inputs.desktop == 'GNOME' }}
-        run: |
-          sudo chroot "$ROOTFS_MOUNT" systemctl enable sheng-fake-tablet-mode.service sheng-power-key-toggle.service
 
       - name: "Configure sudo"
         run: |
@@ -996,7 +692,7 @@ jobs:
       - name: "Generate boot.img"
         run: |
           PARTITION="${{ steps.partition.outputs.label }}"
-          CMDLINE="root=PARTLABEL=$PARTITION"
+          CMDLINE="root=PARTLABEL=$PARTITION rootwait rw fsck.repair=yes"
 
           if [[ "${{ steps.quiet.outputs.enabled }}" == "true" ]]; then
             CMDLINE="$CMDLINE quiet splash plymouth.ignore-serial-consoles fbcon=map:1"
@@ -1048,7 +744,7 @@ jobs:
       - name: "Upload RootFS Image"
         uses: actions/upload-artifact@v7
         with:
-          name: rootfs-${{ inputs.fedora_version }}-${{ steps.de.outputs.name }}-${{ steps.partition.outputs.label }}
+          name: rootfs-luma-mobile-alpha1-fp6-${{ steps.partition.outputs.label }}
           path: rootfs.img
           retention-days: 14
           compression-level: 1
