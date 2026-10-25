@@ -516,7 +516,11 @@ jobs:
       - name: "Mount RootFS Image"
         run: |
           sudo mkdir -p "$ROOTFS_MOUNT"
-          sudo mount -o loop rootfs.img "$ROOTFS_MOUNT"
+          ROOTFS_OFFSET=$((481 * 1024 * 1024))
+          echo "ROOTFS_OFFSET=$ROOTFS_OFFSET" >> "$GITHUB_ENV"
+          ROOTFS_LOOP_DEVICE=$(sudo losetup --find --show --offset "$ROOTFS_OFFSET" rootfs.img)
+          echo "ROOTFS_LOOP_DEVICE=$ROOTFS_LOOP_DEVICE" >> "$GITHUB_ENV"
+          sudo mount -t ext4 "$ROOTFS_LOOP_DEVICE" "$ROOTFS_MOUNT"
           echo "✓ RootFS image mounted at $ROOTFS_MOUNT"
 
       - name: "Mount Virtual File Systems"
@@ -729,9 +733,24 @@ jobs:
           if mountpoint -q "$ROOTFS_MOUNT" 2>/dev/null; then
             sudo umount "$ROOTFS_MOUNT"
           fi
-          e2fsck -f -y rootfs.img
-          tune2fs -U ee8d3593-59b1-480e-a3b6-4fefb17ee7d8 rootfs.img
-          echo "✓ Image unmounted, UUID set"
+          sudo e2fsck -f -y "$ROOTFS_LOOP_DEVICE"
+          sudo tune2fs -U ee8d3593-59b1-480e-a3b6-4fefb17ee7d8 "$ROOTFS_LOOP_DEVICE"
+          FS_INFO=$(sudo dumpe2fs -h "$ROOTFS_LOOP_DEVICE" 2>/dev/null)
+          FS_BLOCK_SIZE=$(awk -F: '$1 == "Block size" {gsub(/[[:space:]]/, "", $2); print $2}' <<< "$FS_INFO")
+          FS_BLOCK_COUNT=$(awk -F: '$1 == "Block count" {gsub(/[[:space:]]/, "", $2); print $2}' <<< "$FS_INFO")
+          if [[ ! "$FS_BLOCK_SIZE" =~ ^[0-9]+$ || "$FS_BLOCK_SIZE" == 0 || ! "$FS_BLOCK_COUNT" =~ ^[0-9]+$ || "$FS_BLOCK_COUNT" == 0 ]] || ((ROOTFS_OFFSET % FS_BLOCK_SIZE != 0)); then
+            echo "::error::Could not determine aligned ext4 filesystem bounds"
+            exit 1
+          fi
+          sudo losetup -d "$ROOTFS_LOOP_DEVICE"
+          sudo dd if=rootfs.img of=rootfs-ext4.img \
+            bs="$FS_BLOCK_SIZE" \
+            skip="$((ROOTFS_OFFSET / FS_BLOCK_SIZE))" \
+            count="$FS_BLOCK_COUNT" \
+            conv=sparse status=progress
+          sudo dumpe2fs -h rootfs-ext4.img >/dev/null 2>&1
+          mv rootfs-ext4.img rootfs.img
+          echo "✓ Ext4 filesystem extracted as a standalone flashable image"
 
       - name: "Upload Boot Image"
         uses: actions/upload-artifact@v7
