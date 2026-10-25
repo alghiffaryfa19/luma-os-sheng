@@ -525,7 +525,7 @@ jobs:
 
       - name: "Mount Virtual File Systems"
         run: |
-          sudo mkdir -p "$ROOTFS_MOUNT/dev/pts" "$ROOTFS_MOUNT/proc" "$ROOTFS_MOUNT/sys"
+          sudo mkdir -p "$ROOTFS_MOUNT/dev/pts" "$ROOTFS_MOUNT/proc" "$ROOTFS_MOUNT/sys" "$ROOTFS_MOUNT/etc"
           sudo mount --bind /dev "$ROOTFS_MOUNT/dev"
           sudo mount --bind /dev/pts "$ROOTFS_MOUNT/dev/pts"
           sudo mount -t proc proc "$ROOTFS_MOUNT/proc"
