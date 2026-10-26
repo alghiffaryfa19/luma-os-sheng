@@ -528,7 +528,7 @@ jobs:
           USERDATA_LOOP_DEVICE=$(sudo losetup --find --show --partscan --sector-size 4096 rootfs.img)
           echo "USERDATA_LOOP_DEVICE=$USERDATA_LOOP_DEVICE" >> "$GITHUB_ENV"
           sudo udevadm settle
-          ROOT_PARTITION=$(lsblk --list --noheadings --raw --output PATH,PARTLABEL "$USERDATA_LOOP_DEVICE" | awk '$2 == "LumaRoot" { print $1; exit }')
+          ROOT_PARTITION=$(lsblk --noheadings --raw --output PATH,PARTLABEL "$USERDATA_LOOP_DEVICE" | awk '$2 == "LumaRoot" { print $1; exit }')
           if [[ -z "$ROOT_PARTITION" ]]; then
             echo "::error::Could not find the LumaRoot GPT partition in the Alpha1 userdata image"
             exit 1
