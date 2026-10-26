@@ -62,6 +62,14 @@ on:
         required: false
         default: ''
 
+      ostree_slot:
+        description: 'OSTree root deployment to package into userdata rootfs'
+        type: choice
+        options:
+          - 'root.a'
+          - 'root.b'
+        default: 'root.a'
+
       quiet_boot:
         description: 'Enable Plymouth splash and quiet boot'
         type: boolean
@@ -515,13 +523,68 @@ jobs:
 
       - name: "Mount RootFS Image"
         run: |
+          USERDATA_MOUNT=/mnt/luma-userdata
+          sudo mkdir -p "$USERDATA_MOUNT"
+          USERDATA_LOOP_DEVICE=$(sudo losetup --find --show --partscan --sector-size 4096 rootfs.img)
+          echo "USERDATA_LOOP_DEVICE=$USERDATA_LOOP_DEVICE" >> "$GITHUB_ENV"
+          sudo udevadm settle
+          ROOT_PARTITION=$(lsblk --list --noheadings --raw --output PATH,PARTLABEL "$USERDATA_LOOP_DEVICE" | awk '$2 == "LumaRoot" { print $1; exit }')
+          if [[ -z "$ROOT_PARTITION" ]]; then
+            echo "::error::Could not find the LumaRoot GPT partition in the Alpha1 userdata image"
+            exit 1
+          fi
+          ROOT_PARTITION_SIZE=$(sudo blockdev --getsize64 "$ROOT_PARTITION")
+          echo "ROOT_PARTITION=$ROOT_PARTITION" >> "$GITHUB_ENV"
+          echo "ROOT_PARTITION_SIZE=$ROOT_PARTITION_SIZE" >> "$GITHUB_ENV"
+          echo "USERDATA_MOUNT=$USERDATA_MOUNT" >> "$GITHUB_ENV"
+          sudo mount "$ROOT_PARTITION" "$USERDATA_MOUNT"
+
+          ROOTFS_SOURCE="$USERDATA_MOUNT/ostree/${{ inputs.ostree_slot }}"
+          if ! sudo test -d "$ROOTFS_SOURCE"; then
+            echo "::error::Selected OSTree deployment ${{ inputs.ostree_slot }} was not found under ostree/"
+            exit 1
+          fi
+          echo "ROOTFS_SOURCE=$ROOTFS_SOURCE" >> "$GITHUB_ENV"
+          echo "✓ Mounted LumaRoot and selected OSTree deployment ${{ inputs.ostree_slot }}"
+
+      - name: "Verify Mounted Image Is a Linux RootFS"
+        run: |
+          ROOTFS_SHELL=""
+          for shell_path in /usr/bin/sh /bin/sh; do
+            if sudo test -x "$ROOTFS_SOURCE$shell_path"; then
+              ROOTFS_SHELL="$shell_path"
+              break
+            fi
+          done
+          if [[ -z "$ROOTFS_SHELL" ]]; then
+            echo "::error::OSTree deployment ${{ inputs.ostree_slot }} has no executable /usr/bin/sh or /bin/sh; it cannot be used as a chroot rootfs"
+            exit 1
+          fi
+          if ! sudo test -x "$ROOTFS_SOURCE/usr/bin/rpm" && ! sudo test -x "$ROOTFS_SOURCE/bin/rpm"; then
+            echo "::error::OSTree deployment ${{ inputs.ostree_slot }} has no RPM package manager"
+            exit 1
+          fi
+          if ! sudo test -x "$ROOTFS_SOURCE/usr/bin/dnf" && ! sudo test -x "$ROOTFS_SOURCE/bin/dnf"; then
+            echo "::error::OSTree deployment ${{ inputs.ostree_slot }} has no DNF; RPM installation cannot be performed in this workflow"
+            exit 1
+          fi
+          echo "ROOTFS_SHELL=$ROOTFS_SHELL" >> "$GITHUB_ENV"
+          echo "✓ Selected OSTree deployment is suitable for RPM/chroot operations"
+
+      - name: "Extract OSTree Deployment"
+        run: |
+          ROOTFS_MOUNT="$GITHUB_WORKSPACE/rootfs-stage"
           sudo mkdir -p "$ROOTFS_MOUNT"
-          ROOTFS_OFFSET=$((481 * 1024 * 1024))
-          echo "ROOTFS_OFFSET=$ROOTFS_OFFSET" >> "$GITHUB_ENV"
-          ROOTFS_LOOP_DEVICE=$(sudo losetup --find --show --offset "$ROOTFS_OFFSET" rootfs.img)
-          echo "ROOTFS_LOOP_DEVICE=$ROOTFS_LOOP_DEVICE" >> "$GITHUB_ENV"
-          sudo mount -t ext4 "$ROOTFS_LOOP_DEVICE" "$ROOTFS_MOUNT"
-          echo "✓ RootFS image mounted at $ROOTFS_MOUNT"
+          sudo cp -a "$ROOTFS_SOURCE/." "$ROOTFS_MOUNT/"
+          if ! sudo chroot "$ROOTFS_MOUNT" "$ROOTFS_SHELL" -eu -c 'rpm --version >/dev/null && dnf --version >/dev/null'; then
+            echo "::error::The extracted ${{ inputs.ostree_slot }} deployment does not provide a working RPM/DNF environment inside chroot"
+            exit 1
+          fi
+          echo "ROOTFS_MOUNT=$ROOTFS_MOUNT" >> "$GITHUB_ENV"
+          sudo umount "$USERDATA_MOUNT"
+          sudo losetup -d "$USERDATA_LOOP_DEVICE"
+          rm -f rootfs.img
+          echo "✓ OSTree deployment extracted to staging directory"
 
       - name: "Mount Virtual File Systems"
         run: |
@@ -536,7 +599,7 @@ jobs:
 
       - name: "Remove Bundled Kernel and Firmware"
         run: |
-          sudo chroot "$ROOTFS_MOUNT" /bin/sh -eu -c '
+          sudo chroot "$ROOTFS_MOUNT" "$ROOTFS_SHELL" -eu -c '
             packages=$(rpm -qa --qf "%{NAME}\n" | grep -E "^(kernel(-.*)?|.*firmware.*)$" || true)
             if [ -n "$packages" ]; then
               dnf remove -y $packages
@@ -729,29 +792,23 @@ jobs:
           done
           echo "✓ Virtual file systems unmounted"
 
-      - name: "Unmount Image & Set UUID"
+      - name: "Build Flashable RootFS Image"
         run: |
-          if mountpoint -q "$ROOTFS_MOUNT" 2>/dev/null; then
-            sudo umount "$ROOTFS_MOUNT"
-          fi
-          sudo e2fsck -f -y "$ROOTFS_LOOP_DEVICE"
-          sudo tune2fs -U ee8d3593-59b1-480e-a3b6-4fefb17ee7d8 "$ROOTFS_LOOP_DEVICE"
-          FS_INFO=$(sudo dumpe2fs -h "$ROOTFS_LOOP_DEVICE" 2>/dev/null)
-          FS_BLOCK_SIZE=$(awk -F: '$1 == "Block size" {gsub(/[[:space:]]/, "", $2); print $2}' <<< "$FS_INFO")
-          FS_BLOCK_COUNT=$(awk -F: '$1 == "Block count" {gsub(/[[:space:]]/, "", $2); print $2}' <<< "$FS_INFO")
-          if [[ ! "$FS_BLOCK_SIZE" =~ ^[0-9]+$ || "$FS_BLOCK_SIZE" == 0 || ! "$FS_BLOCK_COUNT" =~ ^[0-9]+$ || "$FS_BLOCK_COUNT" == 0 ]] || ((ROOTFS_OFFSET % FS_BLOCK_SIZE != 0)); then
-            echo "::error::Could not determine aligned ext4 filesystem bounds"
+          ROOTFS_BLOCK_SIZE=4096
+          ROOTFS_BLOCK_COUNT=$((ROOT_PARTITION_SIZE / ROOTFS_BLOCK_SIZE))
+          ROOTFS_IMAGE_SIZE=$((ROOTFS_BLOCK_COUNT * ROOTFS_BLOCK_SIZE))
+          if ((ROOTFS_BLOCK_COUNT == 0)); then
+            echo "::error::Invalid LumaRoot partition size: $ROOT_PARTITION_SIZE"
             exit 1
           fi
-          sudo losetup -d "$ROOTFS_LOOP_DEVICE"
-          sudo dd if=rootfs.img of=rootfs-ext4.img \
-            bs="$FS_BLOCK_SIZE" \
-            skip="$((ROOTFS_OFFSET / FS_BLOCK_SIZE))" \
-            count="$FS_BLOCK_COUNT" \
-            conv=sparse status=progress
+          sudo truncate -s "$ROOTFS_IMAGE_SIZE" rootfs-ext4.img
+          sudo mkfs.ext4 -F -b "$ROOTFS_BLOCK_SIZE" \
+            -U ee8d3593-59b1-480e-a3b6-4fefb17ee7d8 \
+            -d "$ROOTFS_MOUNT" rootfs-ext4.img "$ROOTFS_BLOCK_COUNT"
+          sudo e2fsck -f -y rootfs-ext4.img
           sudo dumpe2fs -h rootfs-ext4.img >/dev/null 2>&1
           mv rootfs-ext4.img rootfs.img
-          echo "✓ Ext4 filesystem extracted as a standalone flashable image"
+          echo "✓ Standalone ext4 image created from OSTree deployment (${ROOTFS_IMAGE_SIZE} bytes)"
 
       - name: "Upload Boot Image"
         uses: actions/upload-artifact@v7
@@ -764,7 +821,7 @@ jobs:
       - name: "Upload RootFS Image"
         uses: actions/upload-artifact@v7
         with:
-          name: rootfs-luma-mobile-alpha1-fp6-${{ steps.partition.outputs.label }}
+          name: rootfs-luma-mobile-alpha1-fp6-${{ inputs.ostree_slot }}-${{ steps.partition.outputs.label }}
           path: rootfs.img
           retention-days: 14
           compression-level: 1
